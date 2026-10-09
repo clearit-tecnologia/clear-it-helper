@@ -36,8 +36,8 @@ langfuse:
 # Images
 # ---------------------------------------------------------------------------
 image:
-  # dev: k3d-registry.localhost:5000 | mvp: Harbor on-prem (see infra/values/mvp)
-  registry: k3d-registry.localhost:5000
+  # dev: registry.localhost:5000 | mvp: Harbor on-prem (see infra/values/mvp)
+  registry: registry.localhost:5000
   # Defaults to .Chart.AppVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent

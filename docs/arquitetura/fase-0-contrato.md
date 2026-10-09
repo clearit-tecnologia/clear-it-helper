@@ -26,7 +26,7 @@ clear-helper/
 | Item | Valor |
 |------|-------|
 | Namespace da aplicação | `clear-helper` |
-| Cluster dev | k3d, cluster `clear-helper`, registry `registry.localhost:5000` (no cluster: `k3d-registry.localhost:5000`) |
+| Cluster dev | k3d, cluster `clear-helper`, registry `registry.localhost:5000` (mesmo nome no host e dentro do cluster, via mirror do k3s) |
 | Ingress | Traefik (padrão do k3s), host `clear-helper.localhost` |
 | Rotas | `/api/*` → `clear-helper-api:8000` (prefixo `/api` removido via middleware); `/` → `clear-helper-frontend:3000` |
 | Secrets | Sealed Secrets (controller em `kube-system`); no dev, um script gera e sela os secrets |

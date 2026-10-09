@@ -1,6 +1,6 @@
 # clear-helper chart overrides for dev (k3d).
 image:
-  registry: k3d-registry.localhost:5000
+  registry: registry.localhost:5000
   # scripts/dev-up.sh builds/pushes this tag and restarts the Deployments.
   tag: dev
   pullPolicy: Always

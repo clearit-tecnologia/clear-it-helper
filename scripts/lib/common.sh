@@ -15,7 +15,7 @@ SEALED_SECRETS_NAMESPACE="kube-system"
 SEALED_SECRETS_CONTROLLER="sealed-secrets-controller"
 
 # Images are pushed from the host to the k3d registry and pulled in-cluster as
-# k3d-registry.localhost:5000 (see infra/k3d/cluster.yaml).
+# registry.localhost:5000 (see infra/k3d/cluster.yaml).
 REGISTRY_PUSH="${REGISTRY_PUSH:-localhost:5000}"
 IMAGE_TAG="${IMAGE_TAG:-dev}"
 
