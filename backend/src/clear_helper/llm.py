@@ -14,7 +14,6 @@ from clear_helper.config import Settings
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_TIMEOUT_SECONDS = 120.0
 _CONNECT_TIMEOUT_SECONDS = 10.0
 _MAX_ERROR_DETAIL = 200
 
@@ -138,7 +137,9 @@ class LiteLLMClient:
         self._client = httpx.AsyncClient(
             base_url=settings.litellm_url.rstrip("/"),
             headers=headers,
-            timeout=httpx.Timeout(EMBEDDING_TIMEOUT_SECONDS, connect=_CONNECT_TIMEOUT_SECONDS),
+            # Same budget as chat: on CPU (dev) a batch can wait behind other ingestions
+            # in Ollama's queue for minutes.
+            timeout=self._chat_timeout,
             transport=transport,
         )
 

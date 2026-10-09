@@ -38,14 +38,20 @@ ok "cluster pronto (contexto ${KUBE_CONTEXT})"
 SEALED_SECRETS_VERSION="$(component_version sealed-secrets)"
 [[ -n "${SEALED_SECRETS_VERSION}" ]] || die "versão do sealed-secrets não encontrada em ${APPS_VALUES}"
 
-log "Instalando Sealed Secrets ${SEALED_SECRETS_VERSION} em ${SEALED_SECRETS_NAMESPACE}"
-helm_ctx upgrade --install sealed-secrets sealed-secrets \
-  --repo https://bitnami.github.io/sealed-secrets \
-  --version "${SEALED_SECRETS_VERSION}" \
-  --namespace "${SEALED_SECRETS_NAMESPACE}" \
-  -f "${REPO_ROOT}/infra/values/common/sealed-secrets.yaml" \
-  --wait --timeout 5m >/dev/null
-ok "Sealed Secrets instalado"
+# Bootstrap only: once the root app exists, Argo CD owns Sealed Secrets and a second
+# Helm (server-side apply) upgrade would conflict with the fields Argo CD manages.
+if kubectl_ctx -n "${SEALED_SECRETS_NAMESPACE}" get deployment "${SEALED_SECRETS_CONTROLLER}" >/dev/null 2>&1; then
+  ok "Sealed Secrets já instalado (gerenciado pelo Argo CD)"
+else
+  log "Instalando Sealed Secrets ${SEALED_SECRETS_VERSION} em ${SEALED_SECRETS_NAMESPACE}"
+  helm_ctx upgrade --install sealed-secrets sealed-secrets \
+    --repo https://bitnami.github.io/sealed-secrets \
+    --version "${SEALED_SECRETS_VERSION}" \
+    --namespace "${SEALED_SECRETS_NAMESPACE}" \
+    -f "${REPO_ROOT}/infra/values/common/sealed-secrets.yaml" \
+    --wait --timeout 5m >/dev/null
+  ok "Sealed Secrets instalado"
+fi
 
 log "Instalando Argo CD (chart ${ARGOCD_CHART_VERSION}) em ${ARGOCD_NAMESPACE}"
 helm_ctx upgrade --install argocd argo-cd \
@@ -104,6 +110,15 @@ else
   log "Aplicando root Application (${REPO_URL})"
   kubectl_ctx apply -n "${ARGOCD_NAMESPACE}" -f "${ROOT_APP}" >/dev/null
   ok "root Application aplicada; o Argo CD vai sincronizar operadores -> dados -> app"
+fi
+
+# Re-run the PreSync hooks (migrations/bootstrap) with the freshly pushed ":dev" image.
+# Argo CD may have auto-synced a new commit before the build finished, running the
+# migration Job with the previous image.
+if kubectl_ctx -n "${ARGOCD_NAMESPACE}" get application clear-helper >/dev/null 2>&1; then
+  kubectl_ctx -n "${ARGOCD_NAMESPACE}" patch application clear-helper --type merge \
+    -p '{"operation":{"initiatedBy":{"username":"dev-up"},"sync":{"syncStrategy":{"hook":{}}}}}' >/dev/null
+  ok "sync do clear-helper disparado (migrações com a imagem nova)"
 fi
 
 # Pick up freshly pushed ":dev" images (pullPolicy Always) when the app already exists.
