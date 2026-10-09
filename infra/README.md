@@ -39,7 +39,7 @@ infra/
 
    ```bash
    OLLAMA_HOST=0.0.0.0:11434 ollama serve
-   ollama pull qwen3:4b && ollama pull bge-m3
+   ollama pull qwen3.5:2b && ollama pull bge-m3
    ```
 
    O LiteLLM do cluster acessa o Ollama por `http://host.k3d.internal:11434` (`infra/values/dev/litellm.yaml`).

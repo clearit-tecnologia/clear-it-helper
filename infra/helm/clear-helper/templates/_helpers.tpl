@@ -63,6 +63,26 @@ regular chart resource exists.
   value: {{ .Values.config.redisUrl | quote }}
 - name: CH_QDRANT_URL
   value: {{ .Values.config.qdrantUrl | quote }}
+- name: CH_QDRANT_COLLECTION
+  value: {{ .Values.config.rag.qdrantCollection | quote }}
+- name: CH_LLM_MODEL
+  value: {{ .Values.config.rag.llmModel | quote }}
+- name: CH_LLM_TIMEOUT_SECONDS
+  value: {{ .Values.config.rag.llmTimeoutSeconds | quote }}
+- name: CH_EMBEDDING_MODEL
+  value: {{ .Values.config.rag.embeddingModel | quote }}
+- name: CH_EMBEDDING_DIM
+  value: {{ .Values.config.rag.embeddingDim | quote }}
+- name: CH_CHUNK_SIZE
+  value: {{ .Values.config.rag.chunkSize | quote }}
+- name: CH_CHUNK_OVERLAP
+  value: {{ .Values.config.rag.chunkOverlap | quote }}
+- name: CH_RETRIEVAL_TOP_K
+  value: {{ .Values.config.rag.retrievalTopK | quote }}
+- name: CH_RETRIEVAL_MIN_SCORE
+  value: {{ .Values.config.rag.retrievalMinScore | quote }}
+- name: CH_UPLOAD_MAX_MB
+  value: {{ .Values.config.rag.uploadMaxMb | quote }}
 - name: CH_S3_ENDPOINT
   value: {{ .Values.config.s3.endpoint | quote }}
 - name: CH_S3_BUCKET

@@ -42,3 +42,59 @@ export interface CurrentUser {
   role: UserRole;
   tenant: Tenant;
 }
+
+// Phase 1 types (docs/arquitetura/fase-1-contrato.md).
+
+export type DocumentStatus = "uploaded" | "processing" | "indexed" | "failed";
+
+export interface DocumentItem {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  status: DocumentStatus;
+  error: string | null;
+  page_count: number | null;
+  chunk_count: number | null;
+  pipeline_version: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentListResponse {
+  items: DocumentItem[];
+}
+
+/** Retrieved chunk. `ref` is the number used in the `[n]` citation. */
+export interface Source {
+  ref: number;
+  document_id: string;
+  filename: string;
+  page: number;
+  chunk_index: number;
+  score: number;
+  text: string;
+}
+
+export interface SearchResponse {
+  results: Source[];
+}
+
+export type ChatRole = "user" | "assistant";
+
+export interface ChatHistoryEntry {
+  role: ChatRole;
+  content: string;
+}
+
+export interface ChatRequest {
+  question: string;
+  history: ChatHistoryEntry[];
+}
+
+export interface ChatDoneEvent {
+  answer: string;
+  refused: boolean;
+  usage: Record<string, unknown> | null;
+  latency_ms: number;
+}

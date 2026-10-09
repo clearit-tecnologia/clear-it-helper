@@ -1,0 +1,7 @@
+# Downloaded corpus (untrusted data, not versioned). Regenerate with corpus/fetch_corpus.py
+corpus/files/
+# uv / python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/

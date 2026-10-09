@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from clear_helper.models import Tenant, User
+from clear_helper.models import Document, Tenant, User
 
 
 def normalize_email(email: str) -> str:
@@ -39,3 +39,26 @@ async def get_user_in_tenant(
 async def get_tenant_by_slug(session: AsyncSession, slug: str) -> Tenant | None:
     stmt = select(Tenant).where(Tenant.slug == slug)
     return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def get_document(
+    session: AsyncSession, *, tenant_id: uuid.UUID, document_id: uuid.UUID
+) -> Document | None:
+    stmt = select(Document).where(Document.tenant_id == tenant_id, Document.id == document_id)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def get_document_by_sha256(
+    session: AsyncSession, *, tenant_id: uuid.UUID, sha256: str
+) -> Document | None:
+    stmt = select(Document).where(Document.tenant_id == tenant_id, Document.sha256 == sha256)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def list_documents(session: AsyncSession, *, tenant_id: uuid.UUID) -> list[Document]:
+    stmt = (
+        select(Document)
+        .where(Document.tenant_id == tenant_id)
+        .order_by(Document.created_at.desc(), Document.id.desc())
+    )
+    return list((await session.execute(stmt)).scalars().all())

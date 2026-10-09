@@ -1,16 +1,19 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 
-import { ChatPlaceholder } from "@/components/chat-placeholder";
-import { HealthStatusSection } from "@/components/health/health-status-section";
 import { AppHeader } from "@/components/layout/app-header";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { clearSession } from "@/lib/auth/session";
+import { clearChatHistory } from "@/lib/chat/history";
 
-export function HomeScreen() {
+/**
+ * Authenticated area: resolves the user once (the layout persists across the
+ * Chat, Documentos and Status routes) and renders the header with navigation.
+ */
+export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const state = useCurrentUser();
 
@@ -19,6 +22,8 @@ export function HomeScreen() {
   }, [state.status, router]);
 
   function handleLogout() {
+    // The conversation lives only in this browser session and goes away on logout.
+    clearChatHistory();
     clearSession();
     router.replace("/login");
   }
@@ -53,10 +58,8 @@ export function HomeScreen() {
   return (
     <>
       <AppHeader user={state.user} onLogout={handleLogout} />
-      <main id="conteudo" className="container flex flex-col gap-6 py-8">
-        <h1 className="text-2xl font-semibold">Início</h1>
-        <ChatPlaceholder />
-        <HealthStatusSection />
+      <main id="conteudo" className="container py-8">
+        {children}
       </main>
     </>
   );

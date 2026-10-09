@@ -1,10 +1,16 @@
-"""Administrative commands: ``python -m clear_helper.cli <command>``."""
+"""Administrative commands: ``python -m clear_helper.cli <command>``.
+
+- ``bootstrap``: seed the tenant and admin from ``CH_BOOTSTRAP_*``.
+- ``create-user --tenant T --email E --password-env VAR [--role admin|member]``: create a
+  tenant (if missing) and a user in it; the password is read from the environment variable.
+"""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import logging
+import os
 import re
 import sys
 import unicodedata
@@ -39,6 +45,12 @@ class BootstrapResult:
     admin_created: bool
 
 
+@dataclass(frozen=True, slots=True)
+class EnsureUserResult:
+    tenant_created: bool
+    user_created: bool
+
+
 def slugify(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
     slug = re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-")
@@ -47,9 +59,9 @@ def slugify(value: str) -> str:
     return slug[:100]
 
 
-async def _bootstrap_once(
-    session: AsyncSession, *, tenant_name: str, admin_email: str, admin_password: str
-) -> BootstrapResult:
+async def _ensure_user_once(
+    session: AsyncSession, *, tenant_name: str, email: str, password: str, role: Role
+) -> EnsureUserResult:
     slug = slugify(tenant_name)
     tenant = await get_tenant_by_slug(session, slug)
     tenant_created = tenant is None
@@ -58,25 +70,59 @@ async def _bootstrap_once(
         session.add(tenant)
         await session.flush()
 
-    email = normalize_email(admin_email)
+    email = normalize_email(email)
     user = await get_user_by_email_for_login(session, email)
-    admin_created = user is None
+    user_created = user is None
     if user is None:
         session.add(
             User(
                 tenant_id=tenant.id,
                 email=email,
-                password_hash=hash_password(admin_password),
-                role=Role.ADMIN.value,
+                password_hash=hash_password(password),
+                role=role.value,
                 is_active=True,
             )
         )
     elif user.tenant_id != tenant.id:
-        raise BootstrapError("bootstrap admin email already belongs to another tenant")
-    # An existing admin is left untouched (password/role changes made later are preserved).
+        raise BootstrapError("user email already belongs to another tenant")
+    # An existing user is left untouched (password/role changes made later are preserved).
 
     await session.commit()
-    return BootstrapResult(tenant_created=tenant_created, admin_created=admin_created)
+    return EnsureUserResult(tenant_created=tenant_created, user_created=user_created)
+
+
+async def ensure_user(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    tenant_name: str,
+    email: str,
+    password: str,
+    role: Role,
+) -> EnsureUserResult:
+    """Idempotently create a tenant (by slug) and a user in it."""
+    tenant_name = tenant_name.strip()
+    if not tenant_name:
+        raise BootstrapError("tenant name is empty")
+    if "@" not in email:
+        raise BootstrapError("email is invalid")
+    if len(password) < MIN_BOOTSTRAP_PASSWORD_LENGTH:
+        raise BootstrapError(
+            f"password must have at least {MIN_BOOTSTRAP_PASSWORD_LENGTH} characters"
+        )
+
+    # A concurrent run may win the race on the unique constraints; retry once to converge.
+    for attempt in (1, 2):
+        async with sessionmaker() as session:
+            try:
+                return await _ensure_user_once(
+                    session, tenant_name=tenant_name, email=email, password=password, role=role
+                )
+            except IntegrityError:
+                await session.rollback()
+                if attempt == 2:
+                    raise
+                logger.warning("ensure_user.conflict_retry")
+    raise AssertionError("unreachable")
 
 
 async def bootstrap(
@@ -87,32 +133,14 @@ async def bootstrap(
     admin_password: str,
 ) -> BootstrapResult:
     """Idempotently create the initial tenant and its admin user."""
-    tenant_name = tenant_name.strip()
-    if not tenant_name:
-        raise BootstrapError("tenant name is empty")
-    if "@" not in admin_email:
-        raise BootstrapError("admin email is invalid")
-    if len(admin_password) < MIN_BOOTSTRAP_PASSWORD_LENGTH:
-        raise BootstrapError(
-            f"admin password must have at least {MIN_BOOTSTRAP_PASSWORD_LENGTH} characters"
-        )
-
-    # A concurrent run may win the race on the unique constraints; retry once to converge.
-    for attempt in (1, 2):
-        async with sessionmaker() as session:
-            try:
-                return await _bootstrap_once(
-                    session,
-                    tenant_name=tenant_name,
-                    admin_email=admin_email,
-                    admin_password=admin_password,
-                )
-            except IntegrityError:
-                await session.rollback()
-                if attempt == 2:
-                    raise
-                logger.warning("bootstrap.conflict_retry")
-    raise AssertionError("unreachable")
+    result = await ensure_user(
+        sessionmaker,
+        tenant_name=tenant_name,
+        email=admin_email,
+        password=admin_password,
+        role=Role.ADMIN,
+    )
+    return BootstrapResult(tenant_created=result.tenant_created, admin_created=result.user_created)
 
 
 async def _run_bootstrap(settings: Settings) -> int:
@@ -154,18 +182,74 @@ async def _run_bootstrap(settings: Settings) -> int:
     return 0
 
 
+async def _run_create_user(
+    settings: Settings, *, tenant: str, email: str, password_env: str, role: Role
+) -> int:
+    password = os.environ.get(password_env)
+    if not password:
+        logger.error("create_user.missing_password", extra={"env_var": password_env})
+        return 1
+
+    engine = create_engine(settings.database_url)
+    try:
+        result = await ensure_user(
+            create_sessionmaker(engine),
+            tenant_name=tenant,
+            email=email,
+            password=password,
+            role=role,
+        )
+    except BootstrapError as exc:
+        logger.error("create_user.failed", extra={"reason": str(exc)})
+        return 1
+    finally:
+        await engine.dispose()
+
+    logger.info(
+        "create_user.done",
+        extra={"tenant_created": result.tenant_created, "user_created": result.user_created},
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m clear_helper.cli")
+    # allow_abbrev=False: "--password" must not be accepted as a prefix of "--password-env".
+    parser = argparse.ArgumentParser(prog="python -m clear_helper.cli", allow_abbrev=False)
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("bootstrap", help="seed the initial tenant and admin (idempotent)")
+    create_user = subcommands.add_parser(
+        "create-user",
+        help="create a tenant (if missing) and a user in it (idempotent)",
+        allow_abbrev=False,
+    )
+    create_user.add_argument("--tenant", required=True, help="tenant name (slug derived from it)")
+    create_user.add_argument("--email", required=True)
+    create_user.add_argument(
+        "--password-env",
+        required=True,
+        metavar="VAR",
+        help="name of the environment variable holding the password (never pass it inline)",
+    )
+    create_user.add_argument(
+        "--role", choices=[role.value for role in Role], default=Role.MEMBER.value
+    )
     args = parser.parse_args(argv)
 
     settings = get_settings()
     configure_logging(settings.log_level)
 
-    if args.command != "bootstrap":
-        parser.error(f"unknown command {args.command!r}")
-    return asyncio.run(_run_bootstrap(settings))
+    if args.command == "bootstrap":
+        return asyncio.run(_run_bootstrap(settings))
+    # argparse only accepts the declared subcommands, so this is "create-user".
+    return asyncio.run(
+        _run_create_user(
+            settings,
+            tenant=args.tenant,
+            email=args.email,
+            password_env=args.password_env,
+            role=Role(args.role),
+        )
+    )
 
 
 if __name__ == "__main__":

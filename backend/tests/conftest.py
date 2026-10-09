@@ -23,9 +23,19 @@ from sqlalchemy.pool import StaticPool
 
 from clear_helper.config import Settings, get_settings
 from clear_helper.db import get_session
+from clear_helper.deps import Services
 from clear_helper.main import create_app
 from clear_helper.models import Base, Role, Tenant, User
-from clear_helper.security import hash_password
+from clear_helper.security import create_access_token, hash_password
+from tests.fakes import (
+    EMBEDDING_DIM,
+    FakeJobQueue,
+    FakeLiteLLM,
+    FakeQdrantClient,
+    FakeStorage,
+    make_llm,
+    make_vector_store,
+)
 
 JWT_SECRET = "test-secret-with-at-least-32-characters!"
 ADMIN_EMAIL = "admin@clearit.example"
@@ -39,6 +49,8 @@ def settings() -> Settings:
         jwt_secret=SecretStr(JWT_SECRET),
         jwt_expires_minutes=60,
         database_url="sqlite+aiosqlite:///:memory:",
+        embedding_dim=EMBEDDING_DIM,
+        upload_max_mb=1,
         _env_file=None,
     )
 
@@ -78,9 +90,80 @@ async def admin(sessionmaker: async_sessionmaker[AsyncSession]) -> User:
         return user
 
 
+def auth_headers(user: User) -> dict[str, str]:
+    token = create_access_token(
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        role=Role(user.role),
+        secret=JWT_SECRET,
+        expires_minutes=5,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
 @pytest.fixture
-def app(settings: Settings, sessionmaker: async_sessionmaker[AsyncSession]) -> FastAPI:
+async def other_user(sessionmaker: async_sessionmaker[AsyncSession]) -> User:
+    """A member of a second tenant, used to check tenant isolation."""
+    async with sessionmaker() as session:
+        tenant = Tenant(name="Outro Órgão", slug="outro-orgao")
+        session.add(tenant)
+        await session.flush()
+        user = User(
+            tenant_id=tenant.id,
+            email="member@outro.example",
+            password_hash=hash_password(ADMIN_PASSWORD),
+            role=Role.MEMBER.value,
+        )
+        session.add(user)
+        await session.commit()
+        return user
+
+
+@pytest.fixture
+def fake_storage() -> FakeStorage:
+    return FakeStorage()
+
+
+@pytest.fixture
+def fake_qdrant() -> FakeQdrantClient:
+    return FakeQdrantClient()
+
+
+@pytest.fixture
+def fake_llm() -> FakeLiteLLM:
+    return FakeLiteLLM()
+
+
+@pytest.fixture
+def fake_jobs() -> FakeJobQueue:
+    return FakeJobQueue()
+
+
+@pytest.fixture
+async def services(
+    settings: Settings,
+    fake_storage: FakeStorage,
+    fake_qdrant: FakeQdrantClient,
+    fake_llm: FakeLiteLLM,
+    fake_jobs: FakeJobQueue,
+) -> AsyncIterator[Services]:
+    llm = make_llm(settings, fake_llm)
+    yield Services(
+        storage=fake_storage,
+        vector_store=make_vector_store(fake_qdrant, settings),
+        llm=llm,
+        jobs=fake_jobs,
+    )
+    await llm.aclose()
+
+
+@pytest.fixture
+def app(
+    settings: Settings, sessionmaker: async_sessionmaker[AsyncSession], services: Services
+) -> FastAPI:
     application = create_app(settings)
+    # The lifespan does not run under httpx.ASGITransport: install the fakes directly.
+    application.state.services = services
 
     async def _session_override() -> AsyncIterator[AsyncSession]:
         async with sessionmaker() as session:

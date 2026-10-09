@@ -1,0 +1,60 @@
+# Corpus do golden set v1 (Fase 1): normas públicas federais.
+#
+# Licença: textos de leis são de domínio público. A Lei 9.610/1998 (Direitos Autorais),
+# art. 8º, IV, exclui da proteção autoral "os textos de tratados ou convenções, leis, decretos,
+# regulamentos, decisões judiciais e demais atos oficiais". Uso comercial e redistribuição livres.
+#
+# Fonte: portal da legislação da Presidência da República (planalto.gov.br). A página de cada lei
+# é o TEXTO COMPILADO: incorpora as alterações posteriores e mantém a redação antiga riscada
+# (<strike>/line-through). O fetch_corpus.py remove a redação riscada e gera o texto VIGENTE,
+# preservando as notas de alteração, ex.: "(Redação dada pela Lei nº 13.853, de 2019)".
+#
+# Formato gerado: TXT UTF-8, um dispositivo (artigo, parágrafo, inciso, alínea) por linha,
+# sem menus, scripts ou estilos. TXT foi escolhido porque a baseline o aceita (página = 1),
+# a extração é determinística e o mesmo arquivo serve para validar os quotes literais.
+#
+# sha256: hash do arquivo .txt CONVERTIDO (é o arquivo enviado à API). O HTML bruto não serve
+# como trava porque o WAF do Planalto injeta um <script> aleatório a cada download; o hash do
+# bruto fica só no manifesto (files/manifest.json). Se o Planalto publicar nova redação, o hash
+# muda: rode `fetch_corpus.py`, depois o validador do golden set, e só então `--update-lock`.
+version: 1
+sources:
+  - id: lgpd
+    title: Lei Geral de Proteção de Dados Pessoais (LGPD)
+    norma: Lei nº 13.709, de 14 de agosto de 2018
+    url: https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2018/lei/l13709.htm
+    publisher: Presidência da República, Casa Civil (planalto.gov.br)
+    source_format: html
+    source_encoding: windows-1252
+    edition: texto compilado vigente (alterações incorporadas, redação revogada removida)
+    output_file: lei-13709-2018-lgpd.txt
+    output_format: txt (UTF-8)
+    license: "domínio público (Lei 9.610/1998, art. 8º, IV)"
+    sha256: "17becee1f7a5acf0108a9bb67479360942be21efb33584fa53dc0668bf50f6b7"
+    retrieved_at: "2026-10-09"
+  - id: licitacoes
+    title: Lei de Licitações e Contratos Administrativos
+    norma: Lei nº 14.133, de 1º de abril de 2021
+    url: https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm
+    publisher: Presidência da República, Casa Civil (planalto.gov.br)
+    source_format: html
+    source_encoding: windows-1252
+    edition: texto compilado vigente (alterações incorporadas, redação revogada removida)
+    output_file: lei-14133-2021-licitacoes.txt
+    output_format: txt (UTF-8)
+    license: "domínio público (Lei 9.610/1998, art. 8º, IV)"
+    sha256: "41e6b24c74b475b061c12d4fb5e4bc8971748dac797a51916226af604ff7c1c1"
+    retrieved_at: "2026-10-09"
+  - id: lai
+    title: Lei de Acesso à Informação (LAI)
+    norma: Lei nº 12.527, de 18 de novembro de 2011
+    url: https://www.planalto.gov.br/ccivil_03/_ato2011-2014/2011/lei/l12527.htm
+    publisher: Presidência da República, Casa Civil (planalto.gov.br)
+    source_format: html
+    source_encoding: windows-1252
+    edition: texto compilado vigente (alterações incorporadas, redação revogada removida)
+    output_file: lei-12527-2011-lai.txt
+    output_format: txt (UTF-8)
+    license: "domínio público (Lei 9.610/1998, art. 8º, IV)"
+    sha256: "ddf25ba181eff38c32ef75d954c7c798a8798a28e64d8b2a7a57c3d148d1c579"
+    retrieved_at: "2026-10-09"

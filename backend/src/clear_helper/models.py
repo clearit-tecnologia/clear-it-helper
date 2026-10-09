@@ -7,16 +7,21 @@ and indexed. Repositories always receive ``tenant_id`` explicitly.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
+    Enum,
     ForeignKey,
+    Integer,
     MetaData,
     String,
+    Text,
+    UniqueConstraint,
     Uuid,
     func,
     true,
@@ -35,6 +40,17 @@ NAMING_CONVENTION = {
 class Role(StrEnum):
     ADMIN = "admin"
     MEMBER = "member"
+
+
+class DocumentStatus(StrEnum):
+    UPLOADED = "uploaded"
+    PROCESSING = "processing"
+    INDEXED = "indexed"
+    FAILED = "failed"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
@@ -79,3 +95,42 @@ class User(UUIDPrimaryKey, TenantScoped, CreatedAt, Base):
 
     # lazy="raise" forces explicit eager loading and avoids implicit IO in async code.
     tenant: Mapped[Tenant] = relationship(lazy="raise")
+
+
+class Document(UUIDPrimaryKey, TenantScoped, Base):
+    __tablename__ = "documents"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "sha256", name="uq_documents_tenant_id_sha256"),
+    )
+
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    s3_key: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[DocumentStatus] = mapped_column(
+        Enum(
+            DocumentStatus,
+            name="document_status",
+            values_callable=lambda enum: [member.value for member in enum],
+            validate_strings=True,
+        ),
+        nullable=False,
+        default=DocumentStatus.UPLOADED,
+        server_default=DocumentStatus.UPLOADED.value,
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chunk_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pipeline_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Python-side defaults keep the values loaded after flush (no implicit IO in async code).
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_utcnow,
+        onupdate=_utcnow,
+        server_default=func.now(),
+    )

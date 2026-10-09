@@ -9,62 +9,89 @@ export const API_BASE = "/api";
 
 export class ApiError extends Error {
   readonly status: number;
+  /** JSON body of the error response, when present (e.g. `{"detail","document_id"}`). */
+  readonly body: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body: unknown = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.body = body;
   }
 }
 
 interface RequestOptions {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "DELETE";
+  /** Object serialized as JSON, or `FormData` sent as multipart. */
   body?: unknown;
   /** Envia `Authorization: Bearer <token>` com o token da sessão. */
   auth?: boolean;
   /** Status HTTP não-2xx cujo corpo JSON deve ser devolvido normalmente. */
   acceptStatus?: readonly number[];
   signal?: AbortSignal;
+  /** `false` ignores the success body (e.g. 202 without a body defined in the contract). */
+  parseJson?: boolean;
 }
 
-const NETWORK_ERROR = "Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.";
+export const NETWORK_ERROR = "Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.";
 
-function defaultMessage(status: number): string {
+export function defaultMessage(status: number): string {
   if (status === 401) return "Sua sessão expirou ou as credenciais são inválidas.";
   if (status === 403) return "Você não tem permissão para acessar este recurso.";
+  if (status === 404) return "O recurso não foi encontrado. Ele pode ter sido excluído.";
   if (status >= 500) return "O servidor está indisponível no momento. Tente novamente em instantes.";
   return "Não foi possível concluir a solicitação.";
 }
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, auth = false, acceptStatus = [], signal } = options;
-  const headers: Record<string, string> = { Accept: "application/json" };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+/** Builds the `Authorization` header; throws 401 without calling the API when there is no session. */
+export function authHeaders(): Record<string, string> {
+  const token = getAccessToken();
+  if (!token) throw new ApiError(401, defaultMessage(401));
+  return { Authorization: `Bearer ${token}` };
+}
 
-  if (auth) {
-    const token = getAccessToken();
-    if (!token) throw new ApiError(401, defaultMessage(401));
-    headers.Authorization = `Bearer ${token}`;
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+/** Reads the JSON body of an error response without failing when it is missing. */
+export async function readErrorBody(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
   }
+}
+
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { method = "GET", body, auth = false, acceptStatus = [], signal, parseJson = true } = options;
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
+  const headers: Record<string, string> = { Accept: "application/json" };
+  // For multipart the browser sets Content-Type with the boundary.
+  if (body !== undefined && !isForm) headers["Content-Type"] = "application/json";
+
+  if (auth) Object.assign(headers, authHeaders());
 
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isForm ? (body as FormData) : JSON.stringify(body),
       cache: "no-store",
       signal,
     });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    if (isAbortError(error)) throw error;
     throw new ApiError(0, NETWORK_ERROR);
   }
 
   if (!response.ok && !acceptStatus.includes(response.status)) {
     if (response.status === 401 && auth) clearSession();
-    throw new ApiError(response.status, defaultMessage(response.status));
+    throw new ApiError(response.status, defaultMessage(response.status), await readErrorBody(response));
   }
+
+  if (response.status === 204 || !parseJson) return undefined as T;
 
   try {
     return (await response.json()) as T;
