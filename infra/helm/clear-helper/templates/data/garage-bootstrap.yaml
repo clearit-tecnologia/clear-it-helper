@@ -1,0 +1,103 @@
+{{- if and .Values.components.data.enabled .Values.garage.bootstrap.enabled }}
+{{- $name := printf "%s-garage" (include "ch.fullname" .) }}
+{{- $g := .Values.secrets.garage }}
+{{- $buckets := list (printf "%s:APP" .Values.config.s3.bucket) }}
+{{- if .Values.langfuse.enabled }}
+{{- $buckets = append $buckets "langfuse:LANGFUSE" }}
+{{- end }}
+# Idempotent bootstrap: layout + keys + buckets. Runs after the data layer is healthy
+# (Argo CD PostSync / Helm post-install,post-upgrade). The S3 credentials are NOT
+# generated here: they are imported from the "{{ $g.name }}" Secret, which is also the
+# Secret consumed by the API/worker (CH_S3_ACCESS_KEY / CH_S3_SECRET_KEY).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-bootstrap
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "garage-bootstrap") | nindent 4 }}
+data:
+  garage-bootstrap.py: |
+    {{- .Files.Get "files/garage-bootstrap.py" | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-bootstrap
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "garage-bootstrap") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ .Values.garage.bootstrap.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.garage.bootstrap.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "ch.labels" (dict "ctx" . "component" "garage-bootstrap") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: {{ .Values.garage.bootstrap.image.repository }}:{{ .Values.garage.bootstrap.image.tag }}
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-I", "/scripts/garage-bootstrap.py"]
+          env:
+            - name: GARAGE_ADMIN_URL
+              value: http://{{ $name }}:3903
+            - name: GARAGE_ZONE
+              value: {{ .Values.garage.zone | quote }}
+            - name: GARAGE_CAPACITY_BYTES
+              value: {{ .Values.garage.capacityBytes | int64 | quote }}
+            - name: BUCKETS
+              value: {{ join "," $buckets | quote }}
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $g.name }}
+                  key: {{ $g.adminTokenKey }}
+            - name: APP_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $g.name }}
+                  key: {{ $g.accessKeyIdKey }}
+            - name: APP_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $g.name }}
+                  key: {{ $g.secretAccessKeyKey }}
+            {{- if .Values.langfuse.enabled }}
+            - name: LANGFUSE_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $g.name }}
+                  key: {{ $g.langfuseAccessKeyIdKey }}
+            - name: LANGFUSE_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $g.name }}
+                  key: {{ $g.langfuseSecretAccessKeyKey }}
+            {{- end }}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ $name }}-bootstrap
+{{- end }}

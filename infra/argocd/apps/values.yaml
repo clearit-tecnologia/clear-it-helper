@@ -1,0 +1,98 @@
+# Values of the app-of-apps chart. Per-environment overrides: infra/values/<env>/apps.yaml
+#
+# repoURL/targetRevision are injected by infra/argocd/root.yaml (single source of truth).
+repoURL: ""
+targetRevision: ""
+
+# Selects infra/values/<env>/*.yaml for every child Application.
+env: dev
+
+argocdNamespace: argocd
+project: clear-helper
+# Application namespace (contract: all app-facing services live here).
+appNamespace: clear-helper
+
+langfuse:
+  enabled: false
+
+# Sealed secrets committed in Git (mvp). In dev the secrets are generated and applied
+# by scripts/seal-dev-secrets.sh, so this Application stays disabled.
+secretsApp:
+  enabled: false
+  path: infra/secrets/mvp
+
+syncPolicy:
+  automated:
+    prune: true
+    selfHeal: true
+  retry:
+    limit: 10
+    backoff:
+      duration: 15s
+      factor: 2
+      maxDuration: 5m
+
+# Sync waves: operators (0) -> secrets (1) -> data (2) -> gateways/observability (3) -> app (4)
+# Pinned chart versions (checked 2026-10-09).
+components:
+  sealed-secrets:
+    enabled: true
+    wave: 0
+    namespace: kube-system
+    releaseName: sealed-secrets
+    repoURL: https://bitnami.github.io/sealed-secrets
+    chart: sealed-secrets
+    version: 2.20.0
+    valuesFile: sealed-secrets.yaml
+  cnpg-operator:
+    enabled: true
+    wave: 0
+    namespace: cnpg-system
+    releaseName: cnpg
+    repoURL: https://cloudnative-pg.github.io/charts
+    chart: cloudnative-pg
+    version: 0.29.1
+    valuesFile: cnpg-operator.yaml
+    ignoreWebhookCaBundle: true
+  # Required by the Langfuse chart >= 2.0 (ClickHouseCluster/KeeperCluster CRDs).
+  clickhouse-operator:
+    enabled: langfuse
+    wave: 0
+    namespace: clickhouse-operator-system
+    releaseName: clickhouse-operator
+    repoURL: ghcr.io/clickhouse
+    chart: clickhouse-operator-helm
+    version: 0.0.8
+    valuesFile: clickhouse-operator.yaml
+  qdrant:
+    enabled: true
+    wave: 2
+    releaseName: qdrant
+    repoURL: https://qdrant.github.io/qdrant-helm
+    chart: qdrant
+    version: 1.19.2
+    valuesFile: qdrant.yaml
+  litellm:
+    enabled: true
+    wave: 3
+    releaseName: litellm
+    repoURL: ghcr.io/berriai
+    chart: litellm-helm
+    version: 1.104.2
+    valuesFile: litellm.yaml
+  langfuse:
+    enabled: langfuse
+    wave: 3
+    releaseName: langfuse
+    repoURL: https://langfuse.github.io/langfuse-k8s
+    chart: langfuse
+    version: 2.1.4
+    valuesFile: langfuse.yaml
+
+# Helm OCI registries used above (public, no credentials). Declared as Argo CD
+# repositories with enableOCI so that the chart pulls work on every Argo CD version.
+ociRepositories:
+  - name: ghcr-berriai
+    url: ghcr.io/berriai
+  - name: ghcr-clickhouse
+    url: ghcr.io/clickhouse

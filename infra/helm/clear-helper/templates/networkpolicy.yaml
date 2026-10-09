@@ -1,0 +1,51 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+Ingress restrictions for the chart's own workloads:
+- api/frontend: same namespace + ingress controller namespace (Traefik).
+- redis/garage: same namespace only (API, worker, Langfuse, bootstrap Job).
+CloudNativePG pods are intentionally not covered: the operator (cnpg-system) must reach
+the instance manager; add a dedicated policy when hardening (Fase 6).
+*/ -}}
+{{- $ctx := . }}
+{{- if .Values.components.app.enabled }}
+{{- range $component := list "api" "frontend" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ch.fullname" $ctx }}-{{ $component }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" $ctx "component" $component) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ch.selectorLabels" (dict "ctx" $ctx "component" $component) | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ctx.Values.networkPolicy.ingressNamespace }}
+{{- end }}
+{{- end }}
+{{- if .Values.components.data.enabled }}
+{{- range $component := list "redis" "garage" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ch.fullname" $ctx }}-{{ $component }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" $ctx "component" $component) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ch.selectorLabels" (dict "ctx" $ctx "component" $component) | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: {}
+{{- end }}
+{{- end }}
+{{- end }}

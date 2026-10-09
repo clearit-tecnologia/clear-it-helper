@@ -1,0 +1,22 @@
+# Only used when langfuse.enabled=true in infra/values/dev/apps.yaml.
+langfuse:
+  nextauth:
+    url: http://langfuse.clear-helper.localhost
+  ingress:
+    enabled: true
+    className: traefik
+    hosts:
+      - host: langfuse.clear-helper.localhost
+        paths:
+          - path: /
+            pathType: Prefix
+clickhouse:
+  cluster:
+    storage:
+      size: 5Gi
+    resources:
+      requests: {cpu: 250m, memory: 1Gi}
+      limits: {memory: 2Gi}
+  keeper:
+    storage:
+      size: 1Gi

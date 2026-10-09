@@ -1,0 +1,166 @@
+{{- if .Values.components.data.enabled }}
+{{- $name := printf "%s-garage" (include "ch.fullname" .) }}
+{{- $g := .Values.secrets.garage }}
+# Garage single-node S3 (on-prem). S3 API :3900, RPC :3901, admin API :3903.
+# rpc_secret and admin_token come from the Secret via GARAGE_RPC_SECRET / GARAGE_ADMIN_TOKEN.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "garage") | nindent 4 }}
+data:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    db_engine = "lmdb"
+    metadata_auto_snapshot_interval = "6h"
+
+    replication_factor = {{ .Values.garage.replicationFactor }}
+    consistency_mode = "consistent"
+
+    rpc_bind_addr = "0.0.0.0:3901"
+    rpc_public_addr = "127.0.0.1:3901"
+
+    [s3_api]
+    s3_region = "{{ .Values.config.s3.region }}"
+    api_bind_addr = "0.0.0.0:3900"
+    root_domain = ".s3.garage.internal"
+
+    [admin]
+    api_bind_addr = "0.0.0.0:3903"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "garage") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ch.selectorLabels" (dict "ctx" . "component" "garage") | nindent 4 }}
+  ports:
+    - name: s3
+      port: 3900
+      targetPort: s3
+    - name: admin
+      port: 3903
+      targetPort: admin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-headless
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "garage") | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "ch.selectorLabels" (dict "ctx" . "component" "garage") | nindent 4 }}
+  ports:
+    - name: rpc
+      port: 3901
+      targetPort: rpc
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "garage") | nindent 4 }}
+spec:
+  serviceName: {{ $name }}-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ch.selectorLabels" (dict "ctx" . "component" "garage") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ch.labels" (dict "ctx" . "component" "garage") | nindent 8 }}
+      annotations:
+        checksum/config: {{ .Values.garage | toJson | sha256sum | trunc 16 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.garage.runAsUser }}
+        runAsGroup: {{ .Values.garage.runAsGroup }}
+        fsGroup: {{ .Values.garage.runAsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: garage
+          image: {{ .Values.garage.image.repository }}:{{ .Values.garage.image.tag }}
+          imagePullPolicy: IfNotPresent
+          command: ["/garage", "-c", "/etc/garage/garage.toml", "server"]
+          env:
+            - name: GARAGE_RPC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $g.name }}
+                  key: {{ $g.rpcSecretKey }}
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $g.name }}
+                  key: {{ $g.adminTokenKey }}
+            - name: NO_COLOR
+              value: "1"
+          ports:
+            - name: s3
+              containerPort: 3900
+            - name: rpc
+              containerPort: 3901
+            - name: admin
+              containerPort: 3903
+          # TCP probes: /health returns 503 until the layout is applied by the bootstrap Job.
+          livenessProbe:
+            tcpSocket:
+              port: admin
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            tcpSocket:
+              port: s3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.garage.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/garage
+              readOnly: true
+            - name: meta
+              mountPath: /var/lib/garage/meta
+            - name: data
+              mountPath: /var/lib/garage/data
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}-config
+  volumeClaimTemplates:
+    - metadata:
+        name: meta
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.garage.storage.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.garage.storage.metaSize }}
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.garage.storage.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.garage.storage.dataSize }}
+{{- end }}

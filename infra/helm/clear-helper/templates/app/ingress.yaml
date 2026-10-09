@@ -1,0 +1,102 @@
+{{- if and .Values.components.app.enabled .Values.ingress.enabled }}
+{{- $fullname := include "ch.fullname" . }}
+{{- $middleware := printf "%s-strip-api" $fullname }}
+# Removes the /api prefix before forwarding to the API (/api/health/live -> /health/live).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $middleware }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "ingress") | nindent 4 }}
+spec:
+  stripPrefix:
+    prefixes:
+      - /api
+{{- if eq .Values.ingress.type "traefik" }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "ingress") | nindent 4 }}
+spec:
+  entryPoints:
+    {{- toYaml .Values.ingress.entryPoints | nindent 4 }}
+  routes:
+    - kind: Rule
+      match: Host(`{{ .Values.ingress.host }}`) && PathPrefix(`/api`)
+      priority: 100
+      middlewares:
+        - name: {{ $middleware }}
+      services:
+        - name: {{ $fullname }}-api
+          port: 8000
+    - kind: Rule
+      match: Host(`{{ .Values.ingress.host }}`)
+      priority: 10
+      services:
+        - name: {{ $fullname }}-frontend
+          port: 3000
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+{{- else if eq .Values.ingress.type "kubernetes" }}
+---
+# Standard Ingress for /api (with the strip-prefix middleware, Traefik annotation).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "ingress") | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s@kubernetescrd" .Release.Namespace $middleware }}
+spec:
+  ingressClassName: {{ .Values.ingress.ingressClassName }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.ingress.host | quote }}]
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api
+                port:
+                  number: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-frontend
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "ingress") | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.ingressClassName }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.ingress.host | quote }}]
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-frontend
+                port:
+                  number: 3000
+{{- else }}
+{{- fail "ingress.type must be 'traefik' or 'kubernetes'" }}
+{{- end }}
+{{- end }}

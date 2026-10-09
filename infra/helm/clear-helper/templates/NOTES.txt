@@ -1,0 +1,9 @@
+clear-helper {{ .Chart.AppVersion }} (release {{ .Release.Name }}, namespace {{ .Release.Namespace }})
+Layers: data={{ .Values.components.data.enabled }} app={{ .Values.components.app.enabled }} langfuse={{ .Values.langfuse.enabled }}
+{{- if and .Values.components.app.enabled .Values.ingress.enabled }}
+
+UI:  http://{{ .Values.ingress.host }}/
+API: http://{{ .Values.ingress.host }}/api/health/ready
+{{- end }}
+
+Required Secrets (not created by this chart): {{ .Values.secrets.app.name }}, {{ .Values.secrets.garage.name }}, {{ .Values.secrets.litellm.name }}{{ if .Values.langfuse.enabled }}, {{ .Values.langfuse.secretName }}{{ end }}

@@ -1,0 +1,107 @@
+{{- if .Values.components.data.enabled }}
+{{- $name := printf "%s-redis" (include "ch.fullname" .) }}
+# Valkey (Redis-compatible) single instance. DB 0: app queue/cache; DB 1: Langfuse.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "redis") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ch.selectorLabels" (dict "ctx" . "component" "redis") | nindent 4 }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-headless
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "redis") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "ch.selectorLabels" (dict "ctx" . "component" "redis") | nindent 4 }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "redis") | nindent 4 }}
+spec:
+  serviceName: {{ $name }}-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ch.selectorLabels" (dict "ctx" . "component" "redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ch.labels" (dict "ctx" . "component" "redis") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.redis.runAsUser }}
+        runAsGroup: {{ .Values.redis.runAsGroup }}
+        fsGroup: {{ .Values.redis.runAsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: {{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - valkey-server
+            - --dir
+            - /data
+            - --appendonly
+            - "yes"
+            - --maxmemory
+            - {{ .Values.redis.maxmemory | quote }}
+            - --maxmemory-policy
+            - noeviction
+            - --protected-mode
+            - "no"
+          ports:
+            - name: redis
+              containerPort: 6379
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.redis.storage.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.redis.storage.size }}
+{{- end }}

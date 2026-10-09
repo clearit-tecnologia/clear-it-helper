@@ -1,0 +1,21 @@
+# Dev: Ollama running on the host machine (outside the cluster), reached through
+# host.k3d.internal. Ollama must listen on 0.0.0.0 (OLLAMA_HOST=0.0.0.0:11434).
+#   ollama pull qwen3:4b && ollama pull bge-m3
+# Model aliases (qwen3, bge-m3) are the names used by the backend in every environment.
+proxy_config:
+  model_list:
+    - model_name: qwen3
+      litellm_params:
+        model: ollama_chat/qwen3:4b
+        api_base: http://host.k3d.internal:11434
+    - model_name: bge-m3
+      litellm_params:
+        model: ollama/bge-m3
+        api_base: http://host.k3d.internal:11434
+      model_info:
+        mode: embedding
+  litellm_settings:
+    drop_params: true
+    request_timeout: 600
+  general_settings:
+    master_key: os.environ/PROXY_MASTER_KEY

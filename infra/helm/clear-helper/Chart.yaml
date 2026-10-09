@@ -1,0 +1,15 @@
+apiVersion: v2
+name: clear-helper
+description: >-
+  Clear Helper (ClearIT on-premises RAG assistant): API, worker, frontend and the
+  in-chart data layer (CloudNativePG Cluster, Valkey and Garage).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.30.0-0"
+keywords:
+  - rag
+  - fastapi
+  - nextjs
+maintainers:
+  - name: ClearIT

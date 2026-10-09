@@ -1,0 +1,68 @@
+{{- if .Values.components.app.enabled }}
+{{- /*
+Migration and bootstrap Jobs.
+- Argo CD: PreSync hooks, ordered by sync-wave (migrate -2, bootstrap -1).
+- Helm:    pre-install,pre-upgrade hooks, ordered by hook-weight (same numbers).
+Argo CD ignores the helm.sh/hook annotations when argocd.argoproj.io/hook is present.
+They use the default ServiceAccount (no API token) because the chart ServiceAccount
+does not exist yet when PreSync hooks run on the first install.
+*/ -}}
+{{- $jobs := list }}
+{{- if .Values.jobs.migrate.enabled }}
+{{- $jobs = append $jobs (dict "name" "migrate" "weight" "-2" "command" .Values.jobs.migrate.command "bootstrapEnv" false) }}
+{{- end }}
+{{- if .Values.jobs.bootstrap.enabled }}
+{{- $jobs = append $jobs (dict "name" "bootstrap" "weight" "-1" "command" .Values.jobs.bootstrap.command "bootstrapEnv" true) }}
+{{- end }}
+{{- range $job := $jobs }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ch.fullname" $ }}-{{ $job.name }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" $ "component" $job.name) | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: {{ $job.weight | quote }}
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: {{ $job.weight | quote }}
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ $.Values.jobs.backoffLimit }}
+  activeDeadlineSeconds: {{ $.Values.jobs.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "ch.labels" (dict "ctx" $ "component" $job.name) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- include "ch.imagePullSecrets" $ | nindent 6 }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $job.name }}
+          image: {{ include "ch.backendImage" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          workingDir: {{ $.Values.jobs.workingDir }}
+          command:
+            {{- toYaml $job.command | nindent 12 }}
+          env:
+            {{- include "ch.backendEnv" $ | nindent 12 }}
+            {{- if $job.bootstrapEnv }}
+            {{- include "ch.bootstrapEnv" $ | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml $.Values.jobs.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}
+{{- end }}

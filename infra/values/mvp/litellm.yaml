@@ -1,0 +1,35 @@
+# MVP: vLLM (Qwen3) and the embeddings/rerank service run on a dedicated GPU server
+# OUTSIDE the cluster. Only on-prem endpoints are allowed here (no cloud provider).
+# TODO: replace gpu-server.CHANGE-ME.local with the real host and confirm ports/models.
+replicaCount: 2
+# Upstream API keys (vLLM --api-key, embeddings service). Sealed Secret in infra/secrets/mvp.
+environmentSecrets:
+  - litellm-upstream
+proxy_config:
+  model_list:
+    - model_name: qwen3
+      litellm_params:
+        model: hosted_vllm/Qwen/Qwen3-14B
+        api_base: http://gpu-server.CHANGE-ME.local:8000/v1
+        api_key: os.environ/VLLM_API_KEY
+    - model_name: bge-m3
+      litellm_params:
+        # Embeddings service exposing an OpenAI-compatible /v1/embeddings endpoint.
+        model: openai/bge-m3
+        api_base: http://gpu-server.CHANGE-ME.local:8001/v1
+        api_key: os.environ/EMBEDDINGS_API_KEY
+      model_info:
+        mode: embedding
+    # TODO(Fase 4): rerank (bge-reranker-v2-m3) once the service API is defined, e.g.
+    # - model_name: bge-reranker-v2-m3
+    #   litellm_params:
+    #     model: infinity/bge-reranker-v2-m3
+    #     api_base: http://gpu-server.CHANGE-ME.local:8001
+  litellm_settings:
+    drop_params: true
+    request_timeout: 600
+  general_settings:
+    master_key: os.environ/PROXY_MASTER_KEY
+resources:
+  requests: {cpu: 500m, memory: 1Gi}
+  limits: {memory: 4Gi}

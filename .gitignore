@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+package-lock.json
+
+# Env / secrets (nunca comitar secrets em claro; use Sealed Secrets)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+infra/**/secrets.local.yaml
+.secrets/
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.swp
+
+# Eval outputs locais (resultados oficiais vão em eval/results/ e são versionados)
+eval/.cache/

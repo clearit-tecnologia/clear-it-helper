@@ -1,0 +1,43 @@
+# Root Application (app-of-apps). Apply once per cluster:
+#   kubectl apply -n argocd -f infra/argocd/root.yaml
+#
+# >>> The Git repository URL is defined ONLY here (spec.source.repoURL). <<<
+# Child Applications receive it automatically through the Argo CD build environment
+# ($ARGOCD_APP_SOURCE_REPO_URL / $ARGOCD_APP_SOURCE_TARGET_REVISION), and the scripts
+# read it from this file.
+#
+# Environment: change "values/dev/apps.yaml" to "values/mvp/apps.yaml" for the mvp cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: clear-helper-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/clearit-tecnologia/clear-it-helper.git
+    targetRevision: main
+    path: infra/argocd/apps
+    helm:
+      valueFiles:
+        - ../../values/dev/apps.yaml
+      parameters:
+        - name: repoURL
+          value: $ARGOCD_APP_SOURCE_REPO_URL
+        - name: targetRevision
+          value: $ARGOCD_APP_SOURCE_TARGET_REVISION
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m

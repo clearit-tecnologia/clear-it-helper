@@ -1,0 +1,9 @@
+# qdrant/qdrant official chart. Release "qdrant" -> Service http://qdrant:6333 (contract).
+replicaCount: 1
+persistence:
+  size: 10Gi
+config:
+  telemetry_disabled: true
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 2Gi}

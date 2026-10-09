@@ -1,0 +1,6 @@
+apiVersion: v2
+name: clear-helper-apps
+description: App-of-apps for Clear Helper (Argo CD Applications per component).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

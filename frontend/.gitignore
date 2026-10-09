@@ -1,0 +1,11 @@
+node_modules/
+.next/
+out/
+coverage/
+next-env.d.ts
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+# O gerenciador oficial é o pnpm; não versionar lockfile do npm.
+package-lock.json

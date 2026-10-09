@@ -1,0 +1,19 @@
+langfuse:
+  nextauth:
+    # TODO: real Langfuse URL.
+    url: https://langfuse.CHANGE-ME.local
+  ingress:
+    enabled: true
+    className: traefik
+    hosts:
+      - host: langfuse.CHANGE-ME.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      enabled: true
+      secretName: langfuse-tls
+clickhouse:
+  cluster:
+    storage:
+      size: 100Gi

@@ -1,0 +1,31 @@
+# clear-helper chart overrides for dev (k3d).
+image:
+  registry: k3d-registry.localhost:5000
+  # scripts/dev-up.sh builds/pushes this tag and restarts the Deployments.
+  tag: dev
+  pullPolicy: Always
+
+config:
+  env: dev
+  logLevel: DEBUG
+  corsOrigins: http://clear-helper.localhost
+  bootstrap:
+    tenant: ClearIT
+    adminEmail: admin@clearit.com.br
+
+ingress:
+  host: clear-helper.localhost
+  type: traefik
+
+networkPolicy:
+  enabled: false
+
+postgres:
+  instances: 1
+  storage:
+    size: 2Gi
+
+garage:
+  capacityBytes: 5368709120
+  storage:
+    dataSize: 5Gi

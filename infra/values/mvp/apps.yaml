@@ -1,0 +1,8 @@
+# App-of-apps values for the on-prem mvp cluster (k3s/RKE2).
+env: mvp
+langfuse:
+  enabled: true
+# SealedSecrets sealed with the mvp cluster key and committed in infra/secrets/mvp.
+secretsApp:
+  enabled: true
+  path: infra/secrets/mvp

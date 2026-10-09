@@ -1,0 +1,5 @@
+persistence:
+  size: 2Gi
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {memory: 1Gi}

@@ -1,0 +1,48 @@
+{{- if .Values.components.app.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ch.fullname" . }}-worker
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "worker") | nindent 4 }}
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "ch.selectorLabels" (dict "ctx" . "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ch.labels" (dict "ctx" . "component" "worker") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: false
+      # Long ingestion jobs: give arq time to finish the current job on shutdown.
+      terminationGracePeriodSeconds: 120
+      {{- include "ch.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "ch.backendImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.worker.command | nindent 12 }}
+          env:
+            {{- include "ch.backendEnv" . | nindent 12 }}
+          {{- with .Values.worker.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

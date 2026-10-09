@@ -1,0 +1,21 @@
+# LiteLLM proxy (oci://ghcr.io/berriai/litellm-helm). Release "litellm" -> http://litellm:4000.
+# No database in Fase 0 (master key only, no virtual keys/spend tracking).
+# Models are defined per environment (infra/values/<env>/litellm.yaml).
+# Rule: NO cloud provider may be configured here (100% on-premises).
+image:
+  pullPolicy: IfNotPresent
+masterkeySecretName: litellm-masterkey
+masterkeySecretKey: masterkey
+db:
+  useExisting: false
+  deployStandalone: false
+redis:
+  enabled: false
+migrationJob:
+  enabled: false
+envVars:
+  # Use the bundled model cost map instead of downloading it (air-gapped friendly).
+  LITELLM_LOCAL_MODEL_COST_MAP: "True"
+resources:
+  requests: {cpu: 100m, memory: 512Mi}
+  limits: {memory: 2Gi}

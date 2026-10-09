@@ -1,0 +1,8 @@
+# App-of-apps values for the local k3d cluster.
+env: dev
+# Langfuse (+ ClickHouse operator) is heavy for a laptop; enable when you need traces.
+langfuse:
+  enabled: false
+# Dev secrets are generated and applied by scripts/seal-dev-secrets.sh.
+secretsApp:
+  enabled: false

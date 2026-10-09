@@ -1,0 +1,87 @@
+# Langfuse (langfuse/langfuse chart >= 2.x). Release "langfuse" -> http://langfuse-web:3000.
+# Reuses the project's own stores instead of the bundled sub-charts:
+#   PostgreSQL: CNPG Cluster "langfuse-pg" (created by clear-helper-data when langfuse.enabled)
+#   Redis:      clear-helper-redis, DB 1 (noeviction)
+#   S3:         Garage, bucket "langfuse" (bucket + key created by the Garage bootstrap Job)
+#   ClickHouse: ClickHouseCluster via the ClickHouse operator (Application clickhouse-operator)
+# Every credential is pinned to a Secret: under Argo CD (helm template) the chart's
+# lookup-based generation would rotate values on every sync.
+langfuse:
+  salt:
+    secretKeyRef: {name: langfuse-secrets, key: salt}
+  encryptionKey:
+    secretKeyRef: {name: langfuse-secrets, key: encryption-key}
+  nextauth:
+    url: http://langfuse.clear-helper.localhost
+    secret:
+      secretKeyRef: {name: langfuse-secrets, key: nextauth-secret}
+  features:
+    telemetryEnabled: false
+  # Headless initialization: org/project/user and the project API keys used by the backend
+  # (CH_LANGFUSE_PUBLIC_KEY / CH_LANGFUSE_SECRET_KEY read the same Secret).
+  additionalEnv:
+    - name: LANGFUSE_INIT_ORG_ID
+      value: clearit
+    - name: LANGFUSE_INIT_ORG_NAME
+      value: ClearIT
+    - name: LANGFUSE_INIT_PROJECT_ID
+      value: clear-helper
+    - name: LANGFUSE_INIT_PROJECT_NAME
+      value: clear-helper
+    - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+      valueFrom:
+        secretKeyRef: {name: langfuse-secrets, key: public-key}
+    - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
+      valueFrom:
+        secretKeyRef: {name: langfuse-secrets, key: secret-key}
+    - name: LANGFUSE_INIT_USER_EMAIL
+      valueFrom:
+        secretKeyRef: {name: langfuse-secrets, key: admin-email}
+    - name: LANGFUSE_INIT_USER_PASSWORD
+      valueFrom:
+        secretKeyRef: {name: langfuse-secrets, key: admin-password}
+    - name: AUTH_DISABLE_SIGNUP
+      value: "true"
+postgresql:
+  deploy: false
+  host: langfuse-pg-rw
+  auth:
+    username: langfuse
+    database: langfuse
+    existingSecret: langfuse-pg-app
+    secretKeys:
+      userPasswordKey: password
+redis:
+  deploy: false
+  host: clear-helper-redis
+  port: 6379
+  auth:
+    enabled: false
+    username: null
+    password: null
+    database: 1
+clickhouse:
+  deploy: true
+  # Argo CD renders with `helm template`; the CRDs come from the clickhouse-operator app.
+  crdCheck: false
+  auth:
+    existingSecret: langfuse-secrets
+    existingSecretKey: clickhouse-password
+  cluster:
+    replicas: 1
+    storage:
+      size: 20Gi
+  keeper:
+    replicas: 1
+    storage:
+      size: 5Gi
+s3:
+  deploy: false
+  bucket: langfuse
+  region: garage
+  endpoint: http://clear-helper-garage:3900
+  forcePathStyle: true
+  accessKeyId:
+    secretKeyRef: {name: clear-helper-garage, key: langfuse-access-key-id}
+  secretAccessKey:
+    secretKeyRef: {name: clear-helper-garage, key: langfuse-secret-access-key}

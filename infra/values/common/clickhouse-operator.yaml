@@ -1,0 +1,8 @@
+# ClickHouse operator, only needed by Langfuse (ClickHouseCluster/KeeperCluster CRDs).
+# cert-manager is not part of the stack: webhooks and secure metrics are disabled.
+certManager:
+  enabled: false
+webhook:
+  enabled: false
+metrics:
+  secure: false

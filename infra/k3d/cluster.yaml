@@ -1,0 +1,39 @@
+# k3d cluster for local development (Fase 0).
+# Usage: k3d cluster create --config infra/k3d/cluster.yaml   (scripts/dev-up.sh does it for you)
+#
+# - Registry: pushed from the host as localhost:5000 (or registry.localhost:5000);
+#   pulled inside the cluster as k3d-registry.localhost:5000.
+# - Port 80 of the k3d load balancer is published on the host, so
+#   http://clear-helper.localhost reaches Traefik (bundled with k3s, kept enabled).
+# - The host machine (e.g. Ollama) is reachable from pods as host.k3d.internal.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: clear-helper
+servers: 1
+agents: 1
+image: rancher/k3s:v1.36.5-k3s1
+ports:
+  - port: 80:80
+    nodeFilters:
+      - loadbalancer
+  - port: 443:443
+    nodeFilters:
+      - loadbalancer
+registries:
+  create:
+    name: registry.localhost
+    host: "0.0.0.0"
+    hostPort: "5000"
+    volumes:
+      - clear-helper-registry:/var/lib/registry
+options:
+  k3d:
+    wait: true
+    timeout: "300s"
+  k3s:
+    # Traefik stays enabled (k3s default). Do not add --disable=traefik here.
+    extraArgs: []
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true

@@ -1,0 +1,291 @@
+# Default values for the clear-helper chart.
+# Environment overrides live in infra/values/<env>/clear-helper.yaml.
+#
+# The chart has two layers that Argo CD deploys as two Applications (same chart):
+#   - data: CloudNativePG Cluster(s), Valkey (Redis) and Garage (+ bootstrap Job)
+#   - app:  API, worker, frontend, migration/bootstrap hooks and ingress
+# They are split so that the PreSync migration Job only runs once PostgreSQL exists.
+# A plain `helm install` with both enabled will fail on first install (the pre-install
+# migration hook would run before the database); install the data layer first.
+
+# Resource names are fixed by the integration contract (docs/arquitetura/fase-0-contrato.md).
+fullnameOverride: clear-helper
+
+components:
+  data:
+    enabled: true
+  app:
+    enabled: true
+
+# Mirrors the app-of-apps toggle (passed as a parameter by Argo CD). When true the chart
+# also creates the Langfuse PostgreSQL cluster, the Langfuse bucket/key in Garage and the
+# CH_LANGFUSE_* variables for the backend.
+langfuse:
+  enabled: false
+  host: http://langfuse-web:3000
+  # Secret with the Langfuse project API keys (also used by LANGFUSE_INIT_* in the Langfuse chart).
+  secretName: langfuse-secrets
+  publicKeyKey: public-key
+  secretKeyKey: secret-key
+  postgres:
+    name: langfuse-pg
+    instances: 1
+    storageSize: 5Gi
+
+# ---------------------------------------------------------------------------
+# Images
+# ---------------------------------------------------------------------------
+image:
+  # dev: k3d-registry.localhost:5000 | mvp: Harbor on-prem (see infra/values/mvp)
+  registry: k3d-registry.localhost:5000
+  # Defaults to .Chart.AppVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+backendImage:
+  repository: clear-helper-backend
+frontendImage:
+  repository: clear-helper-frontend
+
+# ---------------------------------------------------------------------------
+# Backend configuration (non-secret CH_* variables)
+# ---------------------------------------------------------------------------
+config:
+  env: dev
+  logLevel: INFO
+  # Timeout (seconds) of each dependency check in /health/ready.
+  healthTimeoutSeconds: 2
+  # Comma-separated list.
+  corsOrigins: http://clear-helper.localhost
+  jwtExpiresMinutes: 60
+  redisUrl: redis://clear-helper-redis:6379/0
+  qdrantUrl: http://qdrant:6333
+  litellmUrl: http://litellm:4000
+  s3:
+    endpoint: http://clear-helper-garage:3900
+    bucket: clear-helper-docs
+    region: garage
+  bootstrap:
+    tenant: ClearIT
+    adminEmail: admin@clearit.com.br
+  # Extra plain env vars for api/worker/jobs: [{name: X, value: Y}]
+  extraEnv: []
+
+# Secrets consumed by the workloads. None of them is created by this chart: they come
+# from Sealed Secrets (dev: scripts/seal-dev-secrets.sh; mvp: infra/secrets/mvp) or
+# from CloudNativePG (clear-helper-pg-app).
+secrets:
+  app:
+    name: clear-helper-app
+    jwtSecretKey: jwt-secret
+    bootstrapAdminPasswordKey: bootstrap-admin-password
+  postgres:
+    # Created by CloudNativePG for the Cluster below.
+    name: clear-helper-pg-app
+    uriKey: uri
+  garage:
+    name: clear-helper-garage
+    rpcSecretKey: rpc-secret
+    adminTokenKey: admin-token
+    accessKeyIdKey: access-key-id
+    secretAccessKeyKey: secret-access-key
+    langfuseAccessKeyIdKey: langfuse-access-key-id
+    langfuseSecretAccessKeyKey: langfuse-secret-access-key
+  litellm:
+    # Same Secret used by the LiteLLM chart as master key.
+    name: litellm-masterkey
+    key: masterkey
+
+# ---------------------------------------------------------------------------
+# Shared pod hardening
+# ---------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+serviceAccount:
+  create: true
+  name: clear-helper
+
+# ---------------------------------------------------------------------------
+# App layer
+# ---------------------------------------------------------------------------
+api:
+  replicas: 1
+  # --root-path /api: Traefik strips the /api prefix before forwarding (contract).
+  command: ["uvicorn", "clear_helper.main:app", "--host", "0.0.0.0", "--port", "8000", "--root-path", "/api", "--proxy-headers", "--forwarded-allow-ips", "*"]
+  port: 8000
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  startupProbe:
+    httpGet: {path: /health/live, port: http}
+    periodSeconds: 5
+    failureThreshold: 30
+  livenessProbe:
+    httpGet: {path: /health/live, port: http}
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readinessProbe:
+    httpGet: {path: /health/ready, port: http}
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  pdb:
+    minAvailable: 1
+
+worker:
+  replicas: 1
+  command: ["python", "-m", "clear_helper.worker"]
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "2", memory: 2Gi}
+  # TODO: add a liveness probe once the worker exposes a health signal (e.g. arq health key).
+  livenessProbe: {}
+
+frontend:
+  replicas: 1
+  port: 3000
+  # The frontend image runs as nextjs (1001:1001), see frontend/Dockerfile.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  startupProbe:
+    httpGet: {path: /healthz, port: http}
+    periodSeconds: 5
+    failureThreshold: 30
+  livenessProbe:
+    httpGet: {path: /healthz, port: http}
+    periodSeconds: 15
+  readinessProbe:
+    httpGet: {path: /healthz, port: http}
+    periodSeconds: 10
+  # Writable paths for a read-only root filesystem (Next.js standalone, WORKDIR /app).
+  writablePaths:
+    - /tmp
+    - /app/.next/cache
+  env:
+    - name: NODE_ENV
+      value: production
+    - name: HOSTNAME
+      value: "0.0.0.0"
+    - name: PORT
+      value: "3000"
+    # Server-side calls from Next.js can go straight to the API service.
+    - name: API_INTERNAL_URL
+      value: http://clear-helper-api:8000
+  pdb:
+    minAvailable: 1
+
+# PreSync hooks (Argo CD) / pre-install,pre-upgrade hooks (Helm). Migration runs first.
+jobs:
+  # Directory with alembic.ini and alembic/ in the backend image.
+  workingDir: /app
+  migrate:
+    enabled: true
+    command: ["alembic", "upgrade", "head"]
+  bootstrap:
+    enabled: true
+    command: ["python", "-m", "clear_helper.cli", "bootstrap"]
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+ingress:
+  enabled: true
+  host: clear-helper.localhost
+  # traefik: IngressRoute + Middleware CRDs (k3s/RKE2 with Traefik)
+  # kubernetes: networking.k8s.io/v1 Ingress annotated for Traefik (same middleware)
+  type: traefik
+  entryPoints: ["web"]
+  ingressClassName: traefik
+  tls:
+    enabled: false
+    secretName: ""
+
+networkPolicy:
+  enabled: false
+  # Namespace where the ingress controller runs (Traefik in k3s: kube-system).
+  ingressNamespace: kube-system
+
+# ---------------------------------------------------------------------------
+# Data layer
+# ---------------------------------------------------------------------------
+postgres:
+  # CloudNativePG Cluster "clear-helper-pg" -> services clear-helper-pg-rw/-ro/-r,
+  # secret clear-helper-pg-app (key uri).
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie
+  database: clearhelper
+  owner: app
+  storage:
+    size: 5Gi
+    storageClass: ""
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  parameters:
+    max_connections: "200"
+  enablePodMonitor: false
+
+redis:
+  image:
+    repository: docker.io/valkey/valkey
+    tag: 9.1.2-alpine
+  # valkey user in the official alpine image
+  runAsUser: 999
+  runAsGroup: 999
+  storage:
+    size: 1Gi
+    storageClass: ""
+  # The queue (arq) and Langfuse need noeviction.
+  maxmemory: 256mb
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 384Mi}
+
+garage:
+  image:
+    repository: docker.io/dxflrs/garage
+    tag: v2.4.1
+  runAsUser: 1000
+  runAsGroup: 1000
+  replicationFactor: 1
+  zone: dc1
+  # Capacity announced in the cluster layout (bytes). Keep <= data volume size.
+  capacityBytes: 10737418240
+  storage:
+    metaSize: 1Gi
+    dataSize: 10Gi
+    storageClass: ""
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  bootstrap:
+    enabled: true
+    image:
+      repository: docker.io/library/python
+      tag: 3.13.16-alpine3.24
+    backoffLimit: 10
+    activeDeadlineSeconds: 900

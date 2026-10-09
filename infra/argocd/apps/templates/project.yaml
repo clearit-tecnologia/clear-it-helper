@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ .Values.project }}
+  namespace: {{ .Values.argocdNamespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  description: Clear Helper (Fase 0)
+  sourceRepos:
+    - {{ include "apps.repoURL" . }}
+    {{- range $name, $c := .Values.components }}
+    - {{ $c.repoURL }}
+    {{- end }}
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: {{ .Values.appNamespace }}
+    {{- range $name, $c := .Values.components }}
+    {{- with $c.namespace }}
+    - server: https://kubernetes.default.svc
+      namespace: {{ . }}
+    {{- end }}
+    {{- end }}
+  # Operators install CRDs, ClusterRoles and webhooks.
+  # TODO(Fase 6): narrow this whitelist per component.
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

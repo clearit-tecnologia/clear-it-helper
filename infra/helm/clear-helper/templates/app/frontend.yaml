@@ -1,0 +1,92 @@
+{{- if .Values.components.app.enabled }}
+{{- $name := printf "%s-frontend" (include "ch.fullname" .) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "ch.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ch.labels" (dict "ctx" . "component" "frontend") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: false
+      {{- include "ch.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml (default .Values.podSecurityContext .Values.frontend.podSecurityContext) | nindent 8 }}
+      containers:
+        - name: frontend
+          image: {{ include "ch.frontendImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.port }}
+              protocol: TCP
+          {{- with .Values.frontend.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            {{- toYaml .Values.frontend.startupProbe | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.frontend.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.frontend.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            {{- range $i, $p := .Values.frontend.writablePaths }}
+            - name: writable-{{ $i }}
+              mountPath: {{ $p }}
+            {{- end }}
+      volumes:
+        {{- range $i, $p := .Values.frontend.writablePaths }}
+        - name: writable-{{ $i }}
+          emptyDir: {}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ch.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      protocol: TCP
+{{- if gt (int .Values.frontend.replicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.frontend.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "ch.selectorLabels" (dict "ctx" . "component" "frontend") | nindent 6 }}
+{{- end }}
+{{- end }}

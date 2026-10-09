@@ -1,0 +1,224 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "infra/**"
+      - "scripts/**"
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "infra/**"
+      - "scripts/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HELM_VERSION: v4.3.0
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  # Kubernetes version of the k3d image (infra/k3d/cluster.yaml).
+  KUBERNETES_VERSION: 1.36.5
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      infra: ${{ steps.filter.outputs.infra }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - "backend/**"
+              - ".github/workflows/ci.yml"
+            frontend:
+              - "frontend/**"
+              - ".github/workflows/ci.yml"
+            infra:
+              - "infra/**"
+              - "scripts/**"
+              - ".github/workflows/ci.yml"
+
+  backend:
+    name: Backend (ruff, mypy, pytest)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Ruff (lint)
+        run: uv run ruff check --output-format=github .
+      - name: Ruff (format)
+        run: uv run ruff format --check .
+      - name: Mypy
+        run: uv run mypy
+      - name: Pytest
+        run: uv run pytest
+
+  frontend:
+    name: Frontend (lint, typecheck, test, build)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # pnpm version comes from "packageManager" in frontend/package.json.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+
+  helm:
+    name: Helm (lint, template, kubeconform) + scripts
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Install kubeconform
+        run: |
+          curl -fsSLo /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  /tmp/kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
+      - name: Helm lint
+        run: |
+          set -euo pipefail
+          chart=infra/helm/clear-helper
+          for env in dev mvp; do
+            helm lint "$chart" -f "infra/values/${env}/clear-helper.yaml" --set langfuse.enabled=true
+          done
+          helm lint infra/argocd/apps --set repoURL=https://example.invalid/repo.git
+      - name: Helm template + kubeconform
+        run: |
+          set -euo pipefail
+          mkdir -p rendered
+          chart=infra/helm/clear-helper
+          for env in dev mvp; do
+            for layer in data app; do
+              other=$([ "$layer" = data ] && echo app || echo data)
+              helm template "clear-helper-${layer}" "$chart" -n clear-helper \
+                -f "infra/values/${env}/clear-helper.yaml" \
+                --set "components.${layer}.enabled=true,components.${other}.enabled=false,langfuse.enabled=true" \
+                > "rendered/clear-helper-${env}-${layer}.yaml"
+            done
+            helm template clear-helper-root infra/argocd/apps \
+              -f "infra/values/${env}/apps.yaml" \
+              --set repoURL=https://example.invalid/repo.git,targetRevision=main \
+              > "rendered/apps-${env}.yaml"
+          done
+          kubeconform -strict -summary \
+            -kubernetes-version "${KUBERNETES_VERSION}" \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            rendered/
+      - name: Validate k3d config and Argo CD manifests (YAML syntax)
+        run: |
+          set -euo pipefail
+          python3 -c 'import sys, yaml; [list(yaml.safe_load_all(open(f))) for f in sys.argv[1:]]' \
+            infra/k3d/cluster.yaml infra/argocd/root.yaml infra/argocd/install/argocd-values.yaml \
+            infra/values/*/*.yaml
+      - name: Shell scripts (bash -n + shellcheck)
+        run: |
+          set -euo pipefail
+          for f in scripts/*.sh scripts/lib/*.sh; do bash -n "$f"; done
+          shellcheck -x scripts/*.sh scripts/lib/*.sh
+
+  images:
+    name: Build image (${{ matrix.image }})
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: clear-helper-backend
+            context: backend
+            filter: backend
+          - image: clear-helper-frontend
+            context: frontend
+            filter: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs[matrix.filter] == 'true'
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: needs.changes.outputs[matrix.filter] == 'true'
+      # Build only (no push). Publishing to the on-prem registry (Harbor) is a separate,
+      # approved release pipeline.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        if: needs.changes.outputs[matrix.filter] == 'true'
+        with:
+          context: ${{ matrix.context }}
+          push: false
+          tags: ${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

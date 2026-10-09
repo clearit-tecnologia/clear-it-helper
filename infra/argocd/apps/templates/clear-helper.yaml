@@ -1,0 +1,41 @@
+{{- /*
+The clear-helper chart is deployed twice:
+  clear-helper-data (wave 2): CNPG Cluster(s), Valkey, Garage (+ PostSync bootstrap)
+  clear-helper      (wave 4): API, worker, frontend, PreSync migrate/bootstrap, ingress
+so that the PreSync migration only runs after PostgreSQL exists.
+*/ -}}
+{{- $layers := list (dict "name" "clear-helper-data" "wave" "2" "data" true "app" false) (dict "name" "clear-helper" "wave" "4" "data" false "app" true) }}
+{{- range $l := $layers }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $l.name }}
+  namespace: {{ $.Values.argocdNamespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $l.wave | quote }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: {{ $.Values.project }}
+  source:
+    repoURL: {{ include "apps.repoURL" $ }}
+    targetRevision: {{ include "apps.targetRevision" $ }}
+    path: infra/helm/clear-helper
+    helm:
+      releaseName: {{ $l.name }}
+      ignoreMissingValueFiles: true
+      valueFiles:
+        - ../../values/{{ $.Values.env }}/clear-helper.yaml
+      parameters:
+        - name: components.data.enabled
+          value: {{ $l.data | quote }}
+        - name: components.app.enabled
+          value: {{ $l.app | quote }}
+        - name: langfuse.enabled
+          value: {{ $.Values.langfuse.enabled | quote }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $.Values.appNamespace }}
+  {{- include "apps.syncPolicy" (dict "ctx" $) | nindent 2 }}
+{{- end }}

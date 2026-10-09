@@ -1,0 +1,39 @@
+{{- if .Values.components.data.enabled }}
+{{- /*
+CloudNativePG clusters. The operator creates:
+  <name>-rw / -ro / -r Services and the <name>-app Secret (keys: username, password, uri, ...).
+*/ -}}
+{{- $clusters := list (dict "name" (printf "%s-pg" (include "ch.fullname" .)) "database" .Values.postgres.database "owner" .Values.postgres.owner "instances" .Values.postgres.instances "size" .Values.postgres.storage.size "component" "postgres") }}
+{{- if .Values.langfuse.enabled }}
+{{- $clusters = append $clusters (dict "name" .Values.langfuse.postgres.name "database" "langfuse" "owner" "langfuse" "instances" .Values.langfuse.postgres.instances "size" .Values.langfuse.postgres.storageSize "component" "langfuse-postgres") }}
+{{- end }}
+{{- range $c := $clusters }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $c.name }}
+  labels:
+    {{- include "ch.labels" (dict "ctx" $ "component" $c.component) | nindent 4 }}
+spec:
+  instances: {{ $c.instances }}
+  imageName: {{ $.Values.postgres.imageName }}
+  primaryUpdateStrategy: unsupervised
+  bootstrap:
+    initdb:
+      database: {{ $c.database }}
+      owner: {{ $c.owner }}
+  postgresql:
+    parameters:
+      {{- toYaml $.Values.postgres.parameters | nindent 6 }}
+  storage:
+    size: {{ $c.size }}
+    {{- with $.Values.postgres.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  resources:
+    {{- toYaml $.Values.postgres.resources | nindent 4 }}
+  monitoring:
+    enablePodMonitor: {{ $.Values.postgres.enablePodMonitor }}
+{{- end }}
+{{- end }}
