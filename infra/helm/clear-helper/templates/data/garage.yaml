@@ -143,20 +143,26 @@ spec:
           configMap:
             name: {{ $name }}-config
   volumeClaimTemplates:
-    - metadata:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: meta
       spec:
         accessModes: ["ReadWriteOnce"]
+        volumeMode: Filesystem
         {{- with .Values.garage.storage.storageClass }}
         storageClassName: {{ . }}
         {{- end }}
         resources:
           requests:
             storage: {{ .Values.garage.storage.metaSize }}
-    - metadata:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
+        volumeMode: Filesystem
         {{- with .Values.garage.storage.storageClass }}
         storageClassName: {{ . }}
         {{- end }}
